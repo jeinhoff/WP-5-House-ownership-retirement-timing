@@ -1,0 +1,181 @@
+
+```{r setup}
+library(tidyverse)
+library(survival)
+library(survminer)
+library(ggsurvfit)
+library(gridExtra)
+library(pammtools)
+library(stargazer)
+library(grid)
+
+rm(list = ls())
+
+load("files/data_final.RData")
+```
+
+```{r}
+data <- data %>% filter(sex == "Female")
+
+data <- data %>% mutate(employed = ifelse(employment_status %in% c("Employed"), 1, 0), employed_lag = lag(employed, 1))
+```
+
+```{r}
+data_first <- data %>% group_by(person_id) %>% filter(age == min(age))
+data_empty <- data %>% mutate(employed = NA, employed_lag = NA, homeowner = NA, homeowner_lag = NA) %>% group_by(person_id) %>% filter(age != min(age))
+
+data_empty <- rbind(data_empty, data_first)
+
+data_empty <- data_empty %>% arrange(person_id, age) %>% mutate(retired = NA)
+
+data_empty <- data_empty %>% filter(age != min(age))
+
+rm(data_first)
+```
+
+```{r, warning = F}
+model_outcome <- glm(retired ~ as.factor(age)*homeowner_lag + employed_lag + education + migrantion_background + household_size_lag + care_duties_lag + marital_status_lag + industry_lag + health_status_lag + region + as.factor(year), data, family = binomial("logit"))
+
+model_treatment <- glm(homeowner ~ age + I(age^2) + I(age^3) + education + migrantion_background + household_size + care_duties + marital_status + industry + health_status + region + as.factor(year), data, family = binomial("logit"))
+
+model_employed <- glm(employed ~ homeowner_lag + age + I(age^2) + I(age^3) + education + migrantion_background + household_size + care_duties + marital_status + industry + health_status + region + as.factor(year), data, family = binomial("logit"))
+```
+
+```{r, warning = F}
+##########################
+##### NATURAL COURSE ##### 
+##########################
+
+df_total = data.frame()
+
+runs <- 200
+obs <- 100
+
+for (r in c(1:runs)) {
+  
+  draw <- sample(unique(data_empty$person_id), obs)
+  
+  data_int1 <- data_empty %>% filter(person_id %in% draw)
+  
+  for(i in 1:nrow(data_int1)) {
+    
+      row <- data_int1[i,]
+      row$homeowner <- predict(model_treatment, row, type = "response")
+      data_int1$homeowner[i] <- ifelse(row$homeowner > 0.5, "Homeowner", "Renter")
+      data_int1 <- data_int1 %>% group_by(person_id) %>% mutate(homeowner_lag = lag(homeowner, n = 1))
+    
+      row <- data_int1[i,]
+      row$employed <- predict(model_employed, row, type = "response")
+      data_int1$employed[i] <- rbinom(1, 1, prob = row$employed)
+      data_int1 <- data_int1 %>% group_by(person_id) %>% mutate(employed_lag = lag(employed, n = 1))
+    
+      row <- data_int1[i,]
+      row$retired <- predict(model_outcome, row, type = "response")
+      data_int1$retired[i] <- rbinom(1, 1, prob = row$retired)
+    
+      message(paste("Prediction", i, "of", nrow(data_int1), "in iteration", r, "of", runs, "for the natural course."))
+      }
+  
+  data_int1 <- data_int1 %>% group_by(person_id) %>% filter(!is.na(retired)) %>% mutate(retired = cumsum(retired), retired = cumsum(retired)) %>% filter(retired %in% c(0, 1))
+  data_int1 <- survfit2(Surv(enter, exit, retired) ~ 1, data = data_int1) %>% ggsurvfit()
+  data_int1 <- data_int1$data
+  data_int1 <- data_int1 %>% filter(time %in% c(51:70)) %>% select(time, estimate) %>% arrange(time)
+  data_int1 <- rbind(data_int1, c(50, 1))
+  
+  data_int1$iteration <- paste("Iteration", r)
+
+  df_total <- rbind(df_total,data_int1)
+  
+  rm(data_int1_models)
+  
+}
+
+```
+
+```{r}
+df_total <- df_total %>%
+  group_by(time) %>%
+  mutate('Natural course' = mean(estimate, na.rm = T))
+
+surv <- survfit2(Surv(enter, exit, retired) ~ 1, data = data) %>% ggsurvfit()
+surv <- surv$data
+surv <- surv %>% filter(time %in% c(50:70)) %>% select(time, estimate) %>% rename("Observed" = "estimate")
+surv$iteration <- "Iteration 1"
+
+surv <- surv %>% full_join(df_total, by = c("time", "iteration"))
+
+ggplot(surv, aes(x = time - 0.5)) +
+  geom_step(aes(y = 1 - estimate, group = iteration), color = "darkblue", size = 0.2, alpha = 0.1) +
+  geom_step(aes(y = 1 - `Natural course`), color = "darkblue", size = 1) +
+  geom_step(aes(y = 1 - Observed), color = "darkred", size = 1) +
+  scale_x_continuous("Age", limits = c(49, 70), breaks = seq(50, 76, 5)) +
+  scale_y_continuous("Share retired", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  theme_classic() +
+  coord_cartesian(ylim = c(0,1)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.position=c(.18,.86),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank()) +
+  ggtitle("Male population")
+ggsave("plots/natural_course.png", height = 4, width = 5)
+
+```
+
+```{r}
+surv_original <- survfit2(Surv(enter, exit, retired) ~ 1, data = data) %>% ggsurvfit()
+surv_original <- surv_original$data
+surv_original <- surv_original %>% filter(time %in% c(50:70)) %>% select(time, estimate) %>% arrange(time)
+
+surv_original <- surv_original %>%
+  group_by(time) %>%
+  summarise(
+    survival = 1 - mean(estimate),
+    lower = 1 - survival,
+    upper = 1 - survival,
+    group = "Observed")
+
+surv_natcourse <- df_total %>%
+  group_by(time) %>%
+  summarise(
+    survival = 1 - mean(estimate),
+    lower = survival - 1.96 * sd(estimate),
+    upper = survival + 1.96 * sd(estimate),
+    group = "Natual course")
+
+plot <- rbind(surv_original, surv_natcourse)
+
+ggplot(plot, aes(x = time - 0.5, y = survival, color = group, group = group)) +
+  geom_stepribbon(aes(ymin = lower, ymax = upper, fill = group), alpha = 0.25, colour = "transparent") +
+  geom_step() +
+  scale_x_continuous("Age", limits = c(49, 70), breaks = seq(50, 76, 5)) +
+  scale_y_continuous("Share retired", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  scale_color_manual(values = c("darkblue", "darkred", "blue")) +
+  scale_fill_manual(values = c("darkblue", "darkred", "blue")) +
+  theme_classic() +
+  coord_cartesian(ylim = c(0,1)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.position=c(.18,.86),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank()) +
+  ggtitle("Female population")
+ggsave("plots/natural_course.png", height = 4, width = 5)
+
+```
+
+```{r}
+
+```

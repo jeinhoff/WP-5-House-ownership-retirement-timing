@@ -1,0 +1,245 @@
+
+```{r setup}
+library(tidyverse)
+library(estimatr)
+library(modelsummary)
+
+rm(list = ls())
+
+load("files/data_final.RData")
+```
+
+https://bookdown.org/mike/data_analysis/steps-for-rdit-regression-discontinuity-in-time.html
+
+```{r}
+# sex: Female
+# outcome: Homeowner
+data_female <- data %>% 
+  filter(sex == "Female") %>%
+  mutate(outcome = ifelse(homeowner == "Homeowner", 1, 0),
+         threshold = ifelse(age >= 60, 1, 0))
+
+data_female %>% filter(age >= 50 & age <= 70) %>% select(person_id) %>% unique() %>% nrow()
+data_female %>% filter(age >= 55 & age <= 65) %>% select(person_id) %>% unique() %>% nrow()
+
+# plot
+plot <- data_female %>% filter(age %in% c(50:80)) %>%
+  group_by(age, retired) %>% mutate(total = n()) %>%
+  group_by(age, retired, outcome) %>% mutate(n = n(), share = n / total * 100) %>%
+  select(age, retired, outcome, threshold, share) %>% unique() %>%
+  mutate(complier = ifelse(retired == threshold, 1, 0))
+
+ggplot(plot %>% filter(outcome == 1), aes(x = age, y = share / 100, group = retired, color = as.factor(complier))) +
+  geom_vline(xintercept = 60, size = 0.5, linetype = "dashed") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 1), size = 0.5, se = F, color = "red") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 0), size = 0.5, se = F, color = "red") +
+  geom_point(shape = 21, size = 2) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  scale_x_continuous("Age", breaks = seq(50, 80, 5)) +
+  scale_y_continuous("Share with outcome == 1", breaks = seq(0, 1, 0.02), label = scales::percent) +
+  theme_classic() +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank(),
+        legend.position = "none")
+ggsave("plot_rdd_1.png", height = 4.2, width = 5)
+
+# fuzzy RDDs
+model_1 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_2 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_3 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_4 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_5 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_6 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+modelsummary(list(model_1, model_2, model_3, model_4, model_5, model_6), fmt = 2, stars = T, coef_omit = 1:33)
+
+```
+
+```{r}
+# sex: Female
+# outcome: No mortgage
+data_female <- data %>% 
+  filter(sex == "Female" & homeowner == "Homeowner") %>%
+  mutate(outcome = ifelse(homeowner_type == "No_mortgage", 1, 0),
+         threshold = ifelse(age >= 60, 1, 0))
+
+data_female %>% filter(age >= 50 & age <= 70) %>% select(person_id) %>% unique() %>% nrow()
+data_female %>% filter(age >= 55 & age <= 65) %>% select(person_id) %>% unique() %>% nrow()
+
+# plot
+plot <- data_female %>% filter(age %in% c(50:80)) %>%
+  group_by(age, retired) %>% mutate(total = n()) %>%
+  group_by(age, retired, outcome) %>% mutate(n = n(), share = n / total * 100) %>%
+  select(age, retired, outcome, threshold, share) %>% unique() %>%
+  mutate(complier = ifelse(retired == threshold, 1, 0))
+
+ggplot(plot %>% filter(outcome == 1), aes(x = age, y = share / 100, group = retired, color = as.factor(complier))) +
+  geom_vline(xintercept = 60, size = 0.5, linetype = "dashed") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 1), size = 0.5, se = F, color = "red") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 0), size = 0.5, se = F, color = "red") +
+  geom_point(shape = 21, size = 2) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  scale_x_continuous("Age", breaks = seq(50, 80, 5)) +
+  scale_y_continuous("Share with outcome == 1", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  theme_classic() +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank(),
+        legend.position = "none")
+ggsave("plot_rdd_2.png", height = 4.2, width = 5)
+
+# fuzzy RDDs
+model_1 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_2 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_3 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_4 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_5 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_6 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+modelsummary(list(model_1, model_2, model_3, model_4, model_5, model_6), fmt = 2, stars = T, coef_omit = 1:33)
+```
+
+```{r}
+# sex: Male
+# outcome: Homeowner
+data_male <- data %>% 
+  filter(sex == "Male") %>%
+  mutate(outcome = ifelse(homeowner == "Homeowner", 1, 0),
+         threshold = ifelse(age >= 65, 1, 0))
+
+data_male %>% filter(age >= 55 & age <= 75) %>% select(person_id) %>% unique() %>% nrow()
+data_male %>% filter(age >= 60 & age <= 70) %>% select(person_id) %>% unique() %>% nrow()
+
+# plot
+plot <- data_male %>% filter(age %in% c(50:80)) %>%
+  group_by(age, retired) %>% mutate(total = n()) %>%
+  group_by(age, retired, outcome) %>% mutate(n = n(), share = n / total * 100) %>%
+  select(age, retired, outcome, threshold, share) %>% unique() %>%
+  mutate(complier = ifelse(retired == threshold, 1, 0))
+
+ggplot(plot %>% filter(outcome == 1), aes(x = age, y = share / 100, group = retired, color = as.factor(complier))) +
+  geom_vline(xintercept = 65, size = 0.5, linetype = "dashed") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 1), size = 0.5, se = F, color = "red") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 0), size = 0.5, se = F, color = "red") +
+  geom_point(shape = 21, size = 2) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  scale_x_continuous("Age", breaks = seq(50, 80, 5)) +
+  scale_y_continuous("Share with outcome == 1", breaks = seq(0, 1, 0.02), label = scales::percent) +
+  theme_classic() +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank(),
+        legend.position = "none")
+ggsave("plot_rdd_3.png", height = 4.2, width = 5)
+
+# fuzzy RDDs
+model_1 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_2 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_3 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_4 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_5 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_6 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+modelsummary(list(model_1, model_2, model_3, model_4, model_5, model_6), fmt = 2, stars = T, coef_omit = 1:33)
+```
+
+```{r}
+# sex: Male
+# outcome: No mortgage
+data_male <- data %>% 
+  filter(sex == "Male" & homeowner == "Homeowner") %>%
+  mutate(outcome = ifelse(homeowner_type == "No_mortgage", 1, 0),
+         threshold = ifelse(age >= 65, 1, 0))
+
+data_male %>% filter(age >= 55 & age <= 75) %>% select(person_id) %>% unique() %>% nrow()
+data_male %>% filter(age >= 60 & age <= 70) %>% select(person_id) %>% unique() %>% nrow()
+
+# plot
+plot <- data_male %>% filter(age %in% c(50:80)) %>%
+  group_by(age, retired) %>% mutate(total = n()) %>%
+  group_by(age, retired, outcome) %>% mutate(n = n(), share = n / total * 100) %>%
+  select(age, retired, outcome, threshold, share) %>% unique() %>%
+  mutate(complier = ifelse(retired == threshold, 1, 0))
+
+ggplot(plot %>% filter(outcome == 1), aes(x = age, y = share / 100, group = retired, color = as.factor(complier))) +
+  geom_vline(xintercept = 65, size = 0.5, linetype = "dashed") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 1), size = 0.5, se = F, color = "red") +
+  geom_smooth(data = plot %>% filter(outcome == 1 & complier == 1 & threshold == 0), size = 0.5, se = F, color = "red") +
+  geom_point(shape = 21, size = 2) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  scale_x_continuous("Age", breaks = seq(50, 80, 5)) +
+  scale_y_continuous("Share with outcome == 1", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  theme_classic() +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank(),
+        legend.position = "none")
+ggsave("plot_rdd_4.png", height = 4.2, width = 5)
+
+# fuzzy RDDs
+model_1 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_2 <- iv_robust(outcome ~ age + as.factor(year) + retired | age + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_3 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_4 <- iv_robust(outcome ~ age + I(age^2) + as.factor(year) + retired | age + I(age^2) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+model_5 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 50 & age <= 70), clusters = person_id)
+
+model_6 <- iv_robust(outcome ~ age + I(age^2) + I(age^3) + as.factor(year) + retired | age + I(age^2) + I(age^3) + as.factor(year) + threshold, data = data_female %>% filter(age >= 55 & age <= 65), clusters = person_id)
+
+modelsummary(list(model_1, model_2, model_3, model_4, model_5, model_6), fmt = 2, stars = T, coef_omit = 1:33)
+```
+
+```{r}
+
+```
