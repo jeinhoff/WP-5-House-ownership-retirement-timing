@@ -1,0 +1,179 @@
+---
+title: "1_data"
+---
+
+```{r setup}
+library("tidyverse")
+library("lmtp")
+library("future")
+library("progressr")
+library("ranger")
+library("lubridate")
+library("listenv")
+
+set.seed(999)
+
+options("scipen" = 100, "digits" = 4)
+
+rm(list = ls())
+
+```
+
+```{r, warning = F, message = F}
+start <- Sys.time()
+
+# Load data
+load("data/data_uk_final.RData")
+
+# Set last age
+last_age <- 65
+
+# Create containers for results
+results_renters <- listenv()
+results_outright <- listenv()
+results_mortgage <- listenv()
+
+# Set up parallel computing
+plan(multisession, workers = availableCores())
+
+# Iterate through age range
+for (i in c(last_age:51)) {
+
+# Define treatment, outcome, censoring, and confounder variables
+treatment <- paste0("T_", 50:(i - 1))
+outcome <- paste0("Y_", 51:i)
+censoring <- paste0("C_", 50:(i - 1))
+baseline <- c("female", "education_level", "migrant")
+time_vary <- as.list(paste0("L1_", 50:(i - 1)),  # year
+                     paste0("L2_", 50:(i - 1)),  # marital_status
+                     paste0("L3_", 50:(i - 1)),  # partner_in_hh
+                     paste0("L4_", 50:(i - 1)),  # children_any
+                     paste0("L5_", 50:(i - 1)),  # household_size
+                     paste0("L6_", 50:(i - 1)),  # employment_status
+                     #paste0("L7_", 50:(i - 1)),  # employment_status_partner
+                     paste0("L8_", 50:(i - 1)),  # occupation_group
+                     paste0("L9_", 50:(i - 1)),  # self_employed
+                     paste0("L10_", 50:(i - 1)), # hh_income_eq
+                     paste0("L11_", 50:(i - 1)), # poor_health
+                     #paste0("L12_", 50:(i - 1)), # rural_residence
+                     paste0("L13_", 50:(i - 1)), # region
+                     paste0("L14_", 50:(i - 1))) # unemployment_rate
+
+# Initialize TMLE for renters aged i
+results_renters[[i]] %<-% {lmtp_tmle(data_wide_2_imp,
+                                     trt = treatment,
+                                     outcome = outcome,
+                                     baseline = baseline,
+                                     time_vary = time_vary,
+                                     cens = censoring,
+                                     shift = function(data, trt) {return("Renter")},
+                                     outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                     learners_outcome = c("SL.ranger"), # "SL.ranger", "SL.xgboost", "SL.gam", "SL.glm"
+                                     learners_trt = c("SL.ranger"))}
+
+# Initialize TMLE for outright owners aged i
+results_outright[[i]] %<-% {lmtp_tmle(data_wide_2_imp,
+                                      trt = treatment,
+                                      outcome = outcome,
+                                      baseline = baseline,
+                                      time_vary = time_vary,
+                                      cens = censoring,
+                                      shift = function(data, trt) {return("Outright owner")},
+                                      outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                      learners_outcome = c("SL.ranger"),
+                                      learners_trt = c("SL.ranger"))}
+
+# Initialize TMLE for homeowners w/ mortgage aged i
+results_mortgage[[i]] %<-% {lmtp_tmle(data_wide_2_imp,
+                                      trt = treatment,
+                                      outcome = outcome,
+                                      baseline = baseline,
+                                      time_vary = time_vary,
+                                      cens = censoring,
+                                      shift = function(data, trt) {return("Owner w/ mortgage")},
+                                      outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                      learners_outcome = c("SL.ranger"),
+                                      learners_trt = c("SL.ranger"))}
+
+print(paste0("Initialized TMLE for age ", i, "."))
+
+}
+
+# Gather results
+results_renters <- as.list(results_renters)
+results_outright <- as.list(results_outright)
+results_mortgage <- as.list(results_mortgage)
+
+end <- Sys.time()
+
+print(paste0("Estimation completed at ", paste(hour(start), minute(start), sep=":"), " after ", round(difftime(end, start, units = "mins"), 0), " minutes."))
+
+rm(treatment, outcome, censoring, time_vary, baseline, i, start, end)
+
+```
+
+```{r}
+contrasts_outright <- data.frame()
+contrasts_mortgage <- data.frame()
+results <- data.frame()
+
+for (i in c(51:last_age)) {
+  
+  cntr <- lmtp_contrast(results_outright[[i]], ref = results_renters[[i]], type = c("additive"))
+  cntr$vals$age <- i
+  contrasts_outright <- rbind(contrasts_outright, cntr$vals)
+  
+  cntr <- lmtp_contrast(results_mortgage[[i]], ref = results_renters[[i]], type = c("additive"))
+  cntr$vals$age <- i
+  contrasts_mortgage <- rbind(contrasts_mortgage, cntr$vals)
+  
+  rslt <- tidy(results_renters[[i]])
+  rslt$age <- i
+  rslt$group <- "Renters"
+  results <- rbind(results, rslt)
+  
+  rslt <- tidy(results_outright[[i]])
+  rslt$age <- i
+  rslt$group <- "Outright owners"
+  results <- rbind(results, rslt)
+  
+  rslt <- tidy(results_mortgage[[i]])
+  rslt$age <- i
+  rslt$group <- "Owner w/ mortgage"
+  results <- rbind(results, rslt)
+  
+  rm(cntr, rslt)
+  
+}
+
+rm(i, results_outright, results_mortgage, results_renters, data_de, data_wide_1, data_wide_2)
+
+```
+
+```{r}
+# Covert probability estimate at age 51 into survival
+contrasts_outright$age <- c(51:last_age)
+contrasts_outright$theta <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$theta, contrasts_outright$theta)
+contrasts_outright$conf.low <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$conf.low, contrasts_outright$conf.low)
+contrasts_outright$conf.high <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$conf.high, contrasts_outright$conf.high)
+
+contrasts_mortgage$age <- c(51:last_age)
+contrasts_mortgage$theta <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$theta, contrasts_mortgage$theta)
+contrasts_mortgage$conf.low <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$conf.low, contrasts_mortgage$conf.low)
+contrasts_mortgage$conf.high <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$conf.high, contrasts_mortgage$conf.high)
+
+results$estimate <- ifelse(results$age == 51, 1 - results$estimate, results$estimate)
+results$conf.low <- ifelse(results$age == 51, 1 - results$conf.low, results$conf.low)
+results$conf.high <- ifelse(results$age == 51, 1 - results$conf.high, results$conf.high)
+
+rm(last_age)
+
+```
+
+```{r}
+save.image("outputs/results_uk_2.RData")
+
+```
+
+```{r}
+```

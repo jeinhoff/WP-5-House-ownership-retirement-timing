@@ -1,0 +1,122 @@
+---
+title: "1.2_data_de"
+author: "Jan Einhoff"
+date: "05/2024"
+---
+
+This R markdown file adds missing variables from the UKHLS/BHPS to the base data set.
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("rio")
+
+# Clear workplace
+rm(list = ls())
+
+# Load comparative panel file (CPF) for UK and Germany
+load("data/data_cpf.RData")
+
+# Filter for Germany and years used in the analysis 
+data_uk <- data_cpf %>% filter(country == "UK")
+
+rm(data_cpf)
+
+```
+
+# Housing variables
+```{r}
+# homeowner
+# homeowner_type
+load("data/data_raw/ukhls/housing_tenure.RData")
+
+housing_tenure <- housing_tenure %>%
+  mutate(
+    country = "UK",
+    housing_tenure = case_when(
+    !is.na(housing_tenure.x) & !is.na(housing_tenure.y) ~ as.numeric(housing_tenure.x),
+    is.na(housing_tenure.x) & !is.na(housing_tenure.y) ~ as.numeric(housing_tenure.y),
+    !is.na(housing_tenure.x) & is.na(housing_tenure.y) ~ as.numeric(housing_tenure.x))) %>%
+  select(person_id, year, region, housing_tenure)
+
+housing_tenure <- housing_tenure %>% 
+  mutate(
+    country = "UK",
+    person_id = as.numeric(person_id),
+    homeowner = case_when(
+      housing_tenure %in% c(1, 2) ~ "Homeowner",
+      housing_tenure %in% c(3:8) ~ "Renter",
+      T ~ NA_character_),
+    homeowner_type = case_when(
+      housing_tenure %in% c(1) ~ "Outright owner",
+      housing_tenure %in% c(2) ~ "Mortgagor",
+      housing_tenure %in% c(3:8) ~ "Renter",
+      T ~ NA_character_)) %>%
+  select(person_id, year, region, homeowner, homeowner_type) %>%
+  mutate(person_id = as.character(person_id)) %>%
+  unique()
+
+data_uk <- data_uk %>% left_join(housing_tenure, by = c("orgpid" = "person_id", "year"))
+
+rm(housing_tenure)
+
+```
+
+# Weights
+```{r}
+
+```
+
+```{r}
+# keep respondents only until they enter retirement
+data_uk <- data_uk %>% group_by(orgpid) %>% mutate(retired = cumsum(retired)) %>% filter(retired %in% c(0, 1))
+
+data_uk <- data_uk %>% group_by(orgpid) %>% mutate(retired = cumsum(retired)) %>% filter(retired %in% c(0, 1))
+
+# use self-rated health measure of poor health due to lower missingness than in subjective health
+data_uk <- data_uk %>% select(-c(poor_health_sb)) %>% rename("poor_health" = "poor_health_sr")
+
+# drop duplicate rows
+data_uk$na <- rowSums(is.na(data_uk))
+data_uk <- data_uk %>% group_by(orgpid, age) %>% filter(na == min(na)) %>% slice(1) %>% select(-na)
+
+# drop household identifier and adjust variables types
+data_uk <- data_uk %>%
+  ungroup() %>%
+  select(-c(hid)) %>%
+  mutate(
+    orgpid = as.factor(orgpid),
+    age = as.numeric(age),
+    country = as.factor(country),
+    year = as.factor(year),
+    female = as.numeric(female),
+    year_born = as.numeric(year_born),
+    cohort_born = as.factor(cohort_born),
+    retired = as.numeric(retired),
+    migrant = as.factor(migrant),
+    education_level = as.factor(education_level),
+    marital_status = as.factor(marital_status),
+    partner_in_hh = as.numeric(partner_in_hh),
+    children_any = as.numeric(children_any),
+    household_size = as.numeric(household_size),
+    poor_health = as.numeric(poor_health),
+    employment_status = as.factor(employment_status),
+    hh_income_eq = as.numeric(hh_income_eq),
+    occupation_group = as.factor(occupation_group),
+    public_sector = as.numeric(public_sector),
+    self_employed = as.numeric(self_employed),
+    unemployment_rate = as.numeric(unemployment_rate),
+    homeowner = as.factor(homeowner),
+    homeowner_type = as.factor(homeowner_type),
+    region = as.factor(region)) %>% 
+  unique()
+
+```
+
+```{r}
+save.image("data/data_uk.RData")
+
+```
+
+```{r}
+```

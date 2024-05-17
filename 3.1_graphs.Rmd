@@ -1,0 +1,82 @@
+---
+title: "3.1_graphs"
+author: "Jan Einhoff"
+date: "05/2024"
+---
+
+This R markdown file is used to create cumulative risk and risk difference plots for the first analysis.
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("gridExtra")
+
+# Clear workspace
+rm(list = ls())
+
+# Load results files
+load("outputs/results_de_test.RData")
+
+```
+
+```{r}
+results <- results %>%
+  group_by(group) %>%
+  complete(age = 50:66) %>%
+  arrange(group, age) %>%
+  fill(1:7, .direction = "downup")
+
+plot_1 <- ggplot(results, aes(x = age - 0.5, y = 1 - estimate, group = group, fill = group)) +
+  geom_stepribbon(aes(ymin = 1 - conf.low, ymax = 1 - conf.high), alpha = 0.25) +
+  geom_step(aes(color = group), size = 0.8) +
+  scale_x_continuous("Age", limits = c(50, 66), breaks = seq(50, 65, 1)) +
+  scale_y_continuous("Cumulative risk (% retired)", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  scale_fill_manual(values = c("darkblue", "darkred")) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  theme_classic() +
+  coord_cartesian(ylim = c(0,1), xlim = c(51, 65)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.position=c(.18,.876),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank())
+
+contrasts$sig <- ifelse(contrasts$p.value < 0.05, "Yes", "No")
+
+plot_2 <- ggplot(contrasts, aes(x = age, y = (-1) * theta)) +
+  geom_hline(yintercept = 0, size = 0.5, lty = 2, color = "red") +
+  geom_line(color = "lightgrey") +
+  geom_point(aes(color = sig)) +
+  geom_errorbar(aes(ymin = (-1) * conf.low, ymax = (-1) * conf.high, color = sig), width = 0.5) +
+  theme_classic() +
+  coord_cartesian(xlim = c(51, 65), ylim = c(-0.05, 0.2)) +
+  scale_color_manual(values = c("lightgrey", "black")) +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.position="none") +
+  scale_y_continuous("Risk difference (ATE)", breaks = seq(-0.05, 0.2, 0.05), labels = c("-5pp.", "0pp.", "5pp.", "10pp.", "15pp.", "20pp.")) +
+  scale_x_continuous("Age", breaks = seq(50, 70, 1))
+
+plot_long <- grid.arrange(plot_1, plot_2, nrow = 2)
+
+ggsave("outputs/results_de_new.png", height = 10, width = 4, bg = "transparent", plot_long)
+
+```
+
+```{r}
+```
