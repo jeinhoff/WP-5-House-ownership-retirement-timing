@@ -1,0 +1,129 @@
+---
+title: "3.2_graphs"
+author: "Jan Einhoff"
+date: "05/2024"
+---
+
+This R markdown file is used to create risk difference plots for the second analysis.
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("psfmi")
+
+# Clear workspace
+rm(list = ls())
+
+```
+
+```{r}
+load("data/data_final_uk.RData")
+data <- data_uk
+
+rm(list = setdiff(ls(), "data"))
+
+# Load data
+load("outputs/results_imps/results_imps_type/results_uk_2_imp1.RData")
+contrasts_outright_imp1 <- contrasts_outright %>% mutate(imp = 1)
+contrasts_mortgage_imp1 <- contrasts_mortgage %>% mutate(imp = 1)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp2.RData")
+contrasts_outright_imp2 <- contrasts_outright %>% mutate(imp = 2)
+contrasts_mortgage_imp2 <- contrasts_mortgage %>% mutate(imp = 2)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp3.RData")
+contrasts_outright_imp3 <- contrasts_outright %>% mutate(imp = 3)
+contrasts_mortgage_imp3 <- contrasts_mortgage %>% mutate(imp = 3)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp4.RData")
+contrasts_outright_imp4 <- contrasts_outright %>% mutate(imp = 4)
+contrasts_mortgage_imp4 <- contrasts_mortgage %>% mutate(imp = 4)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp5.RData")
+contrasts_outright_imp5 <- contrasts_outright %>% mutate(imp = 5)
+contrasts_mortgage_imp5 <- contrasts_mortgage %>% mutate(imp = 5)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp6.RData")
+contrasts_outright_imp6 <- contrasts_outright %>% mutate(imp = 6)
+contrasts_mortgage_imp6 <- contrasts_mortgage %>% mutate(imp = 6)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp7.RData")
+contrasts_outright_imp7 <- contrasts_outright %>% mutate(imp = 7)
+contrasts_mortgage_imp7 <- contrasts_mortgage %>% mutate(imp = 7)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp8.RData")
+contrasts_outright_imp8 <- contrasts_outright %>% mutate(imp = 8)
+contrasts_mortgage_imp8 <- contrasts_mortgage %>% mutate(imp = 8)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp9.RData")
+contrasts_outright_imp9 <- contrasts_outright %>% mutate(imp = 9)
+contrasts_mortgage_imp9 <- contrasts_mortgage %>% mutate(imp = 9)
+
+load("outputs/results_imps/results_imps_type/results_uk_2_imp10.RData")
+contrasts_outright_imp10 <- contrasts_outright %>% mutate(imp = 10)
+contrasts_mortgage_imp10 <- contrasts_mortgage %>% mutate(imp = 10)
+
+contrasts_outright_combined <- rbind(contrasts_outright_imp1, contrasts_outright_imp2, contrasts_outright_imp3, contrasts_outright_imp4, contrasts_outright_imp5, contrasts_outright_imp6, contrasts_outright_imp7, contrasts_outright_imp8, contrasts_outright_imp9, contrasts_outright_imp10)
+contrasts_mortgage_combined <- rbind(contrasts_mortgage_imp1, contrasts_mortgage_imp2, contrasts_mortgage_imp3, contrasts_mortgage_imp4, contrasts_mortgage_imp5, contrasts_mortgage_imp6, contrasts_mortgage_imp7, contrasts_mortgage_imp8, contrasts_mortgage_imp9, contrasts_mortgage_imp10)
+
+```
+
+```{r}
+contrasts_outright_combined <- contrasts_outright_combined %>%
+  group_by(age) %>%
+  summarise(
+    risk_diff = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[1],
+    conf_low = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[2],
+    conf_high = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[3],
+    p_value = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[4])
+
+contrasts_mortgage_combined <- contrasts_mortgage_combined %>%
+  group_by(age) %>%
+  summarise(
+    risk_diff = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[1],
+    conf_low = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[2],
+    conf_high = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[3],
+    p_value = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[4])
+
+rm(list = setdiff(ls(), c("contrasts_mortgage_combined", "contrasts_outright_combined", "data")))
+
+```
+
+```{r}
+contrasts_outright_combined$sig <- ifelse(contrasts_outright_combined$p_value < 0.05, "Yes", "No")
+contrasts_mortgage_combined$sig <- ifelse(contrasts_mortgage_combined$p_value < 0.05, "Yes", "No")
+
+plot <- ggplot() +
+  geom_hline(yintercept = 0, size = 0.5, lty = 2, color = "red") +
+  geom_line(data = contrasts_outright_combined, aes(x = age + 0.12, y = (-1) * risk_diff), color = "lightgrey") +
+  geom_line(data = contrasts_mortgage_combined, aes(x = age - 0.12, y = (-1) * risk_diff), color = "lightgrey") +
+  geom_point(data = contrasts_outright_combined, aes(x = age + 0.12, y = (-1) * risk_diff, color = sig, shape = "Outright ownership"), size = 2) +
+  geom_point(data = contrasts_mortgage_combined, aes(x = age - 0.12, y = (-1) * risk_diff, color = sig, shape = "Ownership w/ mortgage"), size = 2) +
+  geom_errorbar(data = contrasts_outright_combined, aes(x = age + 0.12, ymin = (-1) * conf_low, ymax = (-1) * conf_high, color = sig), width = 0) +
+  geom_errorbar(data = contrasts_mortgage_combined, aes(x = age - 0.12 , ymin = (-1) * conf_low, ymax = (-1) * conf_high, color = sig), width = 0) +
+  theme_classic() +
+  coord_cartesian(xlim = c(51, 65), ylim = c(-0.05, 0.3 )) +
+  scale_color_manual(values = c("lightgrey", "black")) +
+  scale_fill_manual(values = c(1, 2)) +
+  guides(colour = "none") +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        legend.position=c(.27,.9),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank(),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank()) +
+  scale_y_continuous("Risk difference (ATE)", breaks = seq(-0.55, 0.55, 0.05), labels = c("-55pp.", "-50pp.", "-45pp.", "-40pp.", "-35pp.", "-30pp.", "-25pp.", "-20pp.", "-15pp.", "-10pp.", "-5pp.", "0pp.", "5pp.", "10pp.", "15pp.", "20pp.", "25pp.", "30pp.", "35pp.", "40pp.", "45pp.", "50pp.", "55pp.")) +
+  scale_x_continuous("Age", breaks = seq(50, 70, 1))
+
+ggsave("plot_2_de_7imps.png", height = 5, width = 4, bg = "transparent", plot)
+
+```
+
+```{r}
+```

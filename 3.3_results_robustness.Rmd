@@ -1,0 +1,71 @@
+---
+title: "3.1_graphs"
+author: "Jan Einhoff"
+date: "05/2024"
+---
+
+This R markdown file is used to create cumulative risk and risk difference plots for the first analysis.
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("psfmi")
+library("pammtools")
+library("gridExtra")
+
+# Clear work space
+rm(list = ls())
+
+options("scipen"=100, "digits"=4)
+
+```
+
+```{r}
+# Load data
+load("outputs/results_imps/results_imps_975/results_de_imp1.RData")
+
+density_ratios_renters = data.frame()
+density_ratios_homeowners = data.frame()
+
+for (i in c(51:65)) {
+  
+col = i - 50
+  
+density_ratios_r <- outputs_renters[i][[1]]$density_ratios[,col]
+density_ratios_r <- as.data.frame(c(density_ratios_r))
+density_ratios_r <- density_ratios_r %>% mutate(Intervention = "Renter", age = i)
+
+density_ratios_h <- outputs_homeowners[i][[1]]$density_ratios[,col]
+density_ratios_h <- as.data.frame(density_ratios_h)
+density_ratios_h <- density_ratios_h %>% mutate(Intervention = "Homeowner", age = i)
+
+density_ratios_renters <- rbind(density_ratios_renters, density_ratios_r)
+density_ratios_homeowners <- rbind(density_ratios_homeowners, density_ratios_h)
+
+print(i)
+  
+}
+
+colnames(density_ratios_renters) <- c("density_ratio", "Intervention", "age")
+colnames(density_ratios_homeowners) <- c("density_ratio", "Intervention", "age")
+
+density_ratios <- rbind(density_ratios_renters, density_ratios_homeowners)
+
+density_ratios <- density_ratios %>% filter(density_ratio != 0)
+
+ggplot(density_ratios, aes(x = as.factor(age), y = density_ratio, color = Intervention, fill = Intervention)) +
+  #geom_violin() +
+  geom_boxplot(width = 0.3, fill = NA, outlier.colour = NA) +
+  theme_linedraw() +
+  scale_y_continuous(breaks = seq(0, 20, 1)) +
+  coord_cartesian(ylim = c(1, 10)) +
+  labs(x = "Age", y = "Density ratio") +
+  scale_color_manual(values = c("darkred", "darkblue"))
+  #scale_fill_manual(values = c("darkred", "darkblue"))
+ggsave("outputs/plots/plot_density_ratios_de.png", height = 3, width = 8)
+
+```
+
+```{r}
+
+```

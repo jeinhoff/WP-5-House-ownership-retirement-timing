@@ -1,0 +1,170 @@
+---
+title: "3.1_graphs"
+author: "Jan Einhoff"
+date: "05/2024"
+---
+
+This R markdown file is used to create cumulative risk and risk difference plots for the first analysis.
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("psfmi")
+library("pammtools")
+library("gridExtra")
+
+# Clear work space
+rm(list = ls())
+
+options("scipen"=100, "digits"=4)
+
+```
+
+```{r}
+load("data/data_final_uk.RData")
+data <- data_uk
+
+rm(list = setdiff(ls(), "data"))
+
+# Load data
+load("outputs/results_imps/results_imps_975/results_uk_imp1.RData")
+results_imp1 <- results %>% mutate(imp = 1)
+contrasts_imp1 <- contrasts %>% mutate(imp = 1)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp2.RData")
+results_imp2 <- results %>% mutate(imp = 2)
+contrasts_imp2 <- contrasts %>% mutate(imp = 2)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp3.RData")
+results_imp3 <- results %>% mutate(imp = 3)
+contrasts_imp3 <- contrasts %>% mutate(imp = 3)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp4.RData")
+results_imp4 <- results %>% mutate(imp = 4)
+contrasts_imp4 <- contrasts %>% mutate(imp = 4)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp5.RData")
+results_imp5 <- results %>% mutate(imp = 5)
+contrasts_imp5 <- contrasts %>% mutate(imp = 5)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp6.RData")
+results_imp6 <- results %>% mutate(imp = 6)
+contrasts_imp6 <- contrasts %>% mutate(imp = 6)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp7.RData")
+results_imp7 <- results %>% mutate(imp = 7)
+contrasts_imp7 <- contrasts %>% mutate(imp = 7)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp8.RData")
+results_imp8 <- results %>% mutate(imp = 8)
+contrasts_imp8 <- contrasts %>% mutate(imp = 8)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp9.RData")
+results_imp9 <- results %>% mutate(imp = 9)
+contrasts_imp9 <- contrasts %>% mutate(imp = 9)
+
+load("outputs/results_imps/results_imps_975/results_uk_imp10.RData")
+results_imp10 <- results %>% mutate(imp = 10)
+contrasts_imp10 <- contrasts %>% mutate(imp = 10)
+
+survival_combined <- rbind(results_imp1, results_imp2, results_imp3, results_imp4, results_imp5, results_imp6, results_imp7, results_imp8, results_imp9, results_imp10)
+contrast_combined <- rbind(contrasts_imp1, contrasts_imp2, contrasts_imp3, contrasts_imp4, contrasts_imp5, contrasts_imp6, contrasts_imp7, contrasts_imp8, contrasts_imp9, contrasts_imp10)
+
+```
+
+```{r}
+# Calculate standard errors from combined imputations
+se <- contrast_combined %>% filter(age == 65)
+
+round(sqrt(mean(se$std.error^2) + (1 + (1/10)) * var(se$std.error)), 3)
+
+rm(se)
+
+```
+
+```{r}
+survival_combined <- survival_combined %>%
+  group_by(group, age) %>%
+  summarise(
+    survival = pool_RR(estimate, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[1],
+    conf_low = pool_RR(estimate, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[2],
+    conf_high = pool_RR(estimate, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[3],
+    p_value = pool_RR(estimate, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[4])
+
+contrast_combined <- contrast_combined %>%
+  group_by(age) %>%
+  summarise(
+    risk_diff = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[1],
+    conf_low = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[2],
+    conf_high = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[3],
+    p_value = pool_RR(theta, std.error, conf.level = 0.95, nrow(data %>% filter(age <= age)), 1)[4])
+
+rm(list = setdiff(ls(), c("survival_combined", "contrast_combined", "data")))
+
+```
+
+```{r}
+survival_combined <- survival_combined %>%
+  group_by(group) %>%
+  complete(age = 50:66) %>%
+  arrange(group, age) %>%
+  fill(1:6, .direction = "downup")
+
+plot_1 <- ggplot(survival_combined, aes(x = age - 0.5, y = 1 - survival, group = group, fill = group)) +
+  geom_stepribbon(aes(ymin = 1 - conf_low, ymax = 1 - conf_high), alpha = 0.25) +
+  geom_step(aes(color = group), size = 0.8) +
+  scale_x_continuous("Age", limits = c(50, 66), breaks = seq(50, 65, 1)) +
+  scale_y_continuous("Cumulative risk (% retired)", breaks = seq(0, 1, 0.1), label = scales::percent) +
+  scale_fill_manual(values = c("darkblue", "darkred")) +
+  scale_color_manual(values = c("darkblue", "darkred")) +
+  theme_classic() +
+  coord_cartesian(ylim = c(0,1), xlim = c(51, 65)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        strip.text.x = element_text(colour = "black"),
+        legend.position=c(.18,.876),
+        legend.key = element_rect(colour = "transparent", fill = "transparent"),
+        legend.background = element_rect(fill = 'transparent'),
+        legend.title = element_blank())
+
+contrast_combined$sig <- ifelse(contrast_combined$p_value < 0.05, "Yes", "No")
+
+plot_2 <- ggplot(contrast_combined, aes(x = age, y = (-1) * risk_diff)) +
+  geom_hline(yintercept = 0, size = 0.5, lty = 2, color = "red") +
+  geom_line(color = "lightgrey") +
+  geom_point(aes(color = sig)) +
+  geom_errorbar(aes(ymin = (-1) * conf_low, ymax = (-1) * conf_high, color = sig), width = 0) +
+  theme_classic() +
+  coord_cartesian(xlim = c(51, 65), ylim = c(-0.05, 0.3)) +
+  scale_color_manual(values = c("lightgrey", "black")) +
+  #scale_color_manual(values = c("black")) +
+  guides(colour = guide_legend(nrow = 2)) +
+  theme(axis.text.x = element_text(color = "black"),
+        axis.text.y = element_text(color = "black"),
+        panel.grid.major.y = element_line(colour = "grey", size = 0.1),
+        panel.spacing.x = unit(0, "pt"),
+        strip.placement = 'outside',
+        strip.background = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.position="none") +
+  scale_y_continuous("Risk difference (ATE)", breaks = seq(-0.55, 0.55, 0.05), labels = c("-55pp.", "-50pp.", "-45pp.", "-40pp.", "-35pp.", "-30pp.", "-25pp.", "-20pp.", "-15pp.", "-10pp.", "-5pp.", "0pp.", "5pp.", "10pp.", "15pp.", "20pp.", "25pp.", "30pp.", "35pp.", "40pp.", "45pp.", "50pp.", "55pp.")) +
+  scale_x_continuous("Age", breaks = seq(50, 70, 1))
+
+plot_long <- grid.arrange(plot_1, plot_2, nrow = 2)
+
+ggsave("outputs/plots/plot_results_de_1.png", height = 10, width = 4, bg = "transparent", plot_long)
+
+rm(list = setdiff(ls(), c("contrast_combined", "survival_combined", "data")))
+
+```
+
+```{r}
+
+```

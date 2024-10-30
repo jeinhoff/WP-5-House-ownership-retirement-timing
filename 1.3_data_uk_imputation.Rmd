@@ -1,6 +1,9 @@
 ---
-title: "1_data_cpf"
+title: "1.3_data_uk_imputation"
+author: "Jan Einhoff"
 ---
+
+This R markdown file is used to impute missing covariate values and structure the data set for the analysis.
 
 ```{r setup}
 # Load packages
@@ -13,10 +16,10 @@ library("lmtp")
 rm(list = ls())
 
 # Load data set for the UK
-load("data/data_uk.RData")
+load("data/data_preprocessed/data_uk.RData")
 
 # Set number of imputations
-n_imputations <- 5
+n_imputations <- 10
 
 # Set seed for replication
 set.seed(999)
@@ -34,12 +37,12 @@ round(colSums(is.na(data_uk))/nrow(data_uk) * 100, 1)
 
 ```{r}
 # exclude variables not used for imputation
-data_uk_wide <- data_uk %>% select(-c("cohort_born", "unemployment_rate"))
+data_uk_wide <- data_uk %>% select(-c("cohort_born", "unemployment_rate", "inflation_rate"))
 
 # convert data set to wide-format for imputation of longitudinal covariates
 data_uk_wide <- data_uk_wide %>%
   group_by(orgpid) %>%
-  pivot_wider(names_from = age, values_from = c(4, 7, 10:22)) %>% 
+  pivot_wider(names_from = age, values_from = c(4, 7, 10:24)) %>% 
   unchop(everything()) %>%
   ungroup() %>%
   select(-c("orgpid"))
@@ -65,7 +68,7 @@ pred[, c("female", "year_born", "migrant", "education_level")] <- 1
 # set methods for imputation of linear, binary, and categorical variables
 meth <- imp_model$meth
 meth[grep("migrant|partner_in_hh|children_any|public_sector|self_employed|homeowner|region|poor_health", names(meth))] <- "pmm"
-meth[grep("education_level|marital_status|employment_status|occupation_group|homeowner_type", names(meth))] <- "polyreg"
+meth[grep("education_level|marital_status|employment_status|employment_status_partner|occupation_group|homeowner_type|social_housing", names(meth))] <- "polyreg"
 meth[grep("household_size|hh_income_eq", names(meth))] <- "pmm"
 
 rm(i, imp_model)
@@ -74,7 +77,7 @@ rm(i, imp_model)
 
 ```{r}
 # create matrix that mirrors data set to indicate where values should be imputed
-where <- data_uk %>% ungroup() %>% filter(age %in% c(50:65)) %>% select(-c("orgpid", "age", "cohort_born", "unemployment_rate"))
+where <- data_uk %>% ungroup() %>% filter(age %in% c(50:65)) %>% select(-c("orgpid", "age", "cohort_born", "unemployment_rate", "inflation_rate"))
 
 where <- is.na(where)
 
@@ -84,7 +87,7 @@ where <- where %>% rename("orgpid" = "V1", "age" = "V2")
 
 where <- where %>%
   group_by(orgpid) %>%
-  pivot_wider(names_from = age, values_from = c(4, 7, 10:22)) %>% 
+  pivot_wider(names_from = age, values_from = c(4, 7, 10:24)) %>% 
   ungroup() %>%
   select(-c("orgpid"))
 
@@ -108,18 +111,18 @@ rm(pred, meth, where, data_de_wide)
 for (i in c(1:n_imputations)) {
 
   # complete data set with imputed values
-  data_uk_imp <- complete(imputation, 1)
+  data_uk_imp <- complete(imputation, i)
 
   # gather excluded vars and add to imputed data set
   vars <- data_uk %>% ungroup() %>%
-    select("orgpid", "age", "unemployment_rate") %>%
+    select("orgpid", "age", "unemployment_rate", "inflation_rate") %>%
     group_by(orgpid) %>%
-    pivot_wider(names_from = age, values_from = c("unemployment_rate"), names_prefix = "unemployment_rate_") %>% 
+    pivot_wider(names_from = age, values_from = c("unemployment_rate", "inflation_rate")) %>% 
     unchop(everything())
 
   data_uk_imp <- cbind(vars, data_uk_imp)
 
-  # convert into wide format
+  # convert into long format
   data_uk_imp <- data_uk_imp %>% 
     rename_with(~ str_c("retired", seq_along(.x)), contains("retired")) %>% 
     pivot_longer(
@@ -156,14 +159,14 @@ for (i in c(1:n_imputations)) {
 
   # have same column names as in base data set
   data_uk_imp <- data_uk_imp[names(data_uk)]
-
+  
   # re-level factor variables
   data_uk_imp <- data_uk_imp %>% 
     mutate(homeowner = as.factor(homeowner), homeowner = fct_relevel(homeowner, c("Renter", "Homeowner"))) %>%
     mutate(homeowner_type = as.factor(homeowner_type), homeowner_type = fct_relevel(homeowner_type, c("Renter", "Outright owner", "Mortgagor")))
 
   # sort variables
-  data_uk_imp <- data_uk_imp %>% select("age", "retired", "homeowner", "homeowner_type", "female", "year_born", "cohort_born", "year", "migrant", "education_level", "poor_health", "marital_status", "partner_in_hh", "children_any", "household_size", "employment_status", "occupation_group", "public_sector", "self_employed", "hh_income_eq", "unemployment_rate", "region")
+  data_uk_imp <- data_uk_imp %>% select("age", "retired", "homeowner", "homeowner_type", "female", "year_born", "cohort_born", "year", "migrant", "education_level", "poor_health", "marital_status", "partner_in_hh", "children_any", "household_size", "employment_status", "employment_status_partner", "occupation_group", "public_sector", "self_employed", "hh_income_eq", "unemployment_rate", "inflation_rate", "region", "social_housing")
 
   # rename variables for analysis
   data_uk_imp_wide <- data_uk_imp %>%
@@ -171,6 +174,7 @@ for (i in c(1:n_imputations)) {
       "Y" = "retired",
       "T1" = "homeowner",
       "T2" = "homeowner_type",
+      "T3" = "social_housing",
       "B1" = "female",
       "B2" = "year_born",
       "B3" = "migrant",
@@ -181,18 +185,21 @@ for (i in c(1:n_imputations)) {
       "L3" = "partner_in_hh",
       "L4" = "children_any",
       "L5" = "employment_status",
-      "L6" = "occupation_group",
-      "L7" = "self_employed",
-      "L8" = "hh_income_eq",
-      "L9" = "region",
-      "L10" = "unemployment_rate",
-      "L11" = "household_size",
-      "L12" = "public_sector")
+      "L6" = "employment_status_partner",
+      "L7" = "occupation_group",
+      "L8" = "self_employed",
+      "L9" = "hh_income_eq",
+      "L10" = "region",
+      "L11" = "unemployment_rate",
+      "L12" = "inflation_rate",
+      "L13" = "household_size",
+      "L14" = "public_sector")
 
   # set variable types for analysis
   data_uk_imp_wide$Y <- as.numeric(as.character(data_uk_imp_wide$Y))
   data_uk_imp_wide$T1 <- as.character(data_uk_imp_wide$T1)
   data_uk_imp_wide$T2 <- as.character(data_uk_imp_wide$T2)
+  data_uk_imp_wide$T3 <- as.character(data_uk_imp_wide$T3)
 
   # create censoring indicator
   data_uk_imp_wide <- data_uk_imp_wide %>% group_by(orgpid) %>% mutate(C = ifelse(age == max(age), 0, 1))
@@ -201,11 +208,51 @@ for (i in c(1:n_imputations)) {
   data_uk_imp_wide <- data_uk_imp_wide %>% 
     pivot_wider(
       names_from = age,
-      values_from = c(Y, T1, T2, C, L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12))
+      values_from = c(Y, T1, T2, T3, C, L0, L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14))
 
   # carry forward last outcome for retired respondents
   data_uk_imp_wide <- data_uk_imp_wide %>% event_locf(paste0("Y_", 50:65)) %>% as.data.frame()
+  
+  # re-level factor variables
+  data_uk_imp <- data_uk_imp %>% 
+    mutate(homeowner = as.factor(homeowner), homeowner = fct_relevel(homeowner, c("Renter", "Homeowner"))) %>%
+    mutate(homeowner_type = as.factor(homeowner_type), homeowner_type = fct_relevel(homeowner_type, c("Renter", "Outright owner", "Mortgagor")))
+  
+  # correct treatment factor variable
+  data_uk_imp_wide_$T1_50 <- factor(data_uk_imp_wide_$T1_50, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_51 <- factor(data_uk_imp_wide_$T1_51, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_52 <- factor(data_uk_imp_wide_$T1_52, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_53 <- factor(data_uk_imp_wide_$T1_53, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_54 <- factor(data_uk_imp_wide_$T1_54, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_55 <- factor(data_uk_imp_wide_$T1_55, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_56 <- factor(data_uk_imp_wide_$T1_56, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_57 <- factor(data_uk_imp_wide_$T1_57, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_58 <- factor(data_uk_imp_wide_$T1_58, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_59 <- factor(data_uk_imp_wide_$T1_59, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_60 <- factor(data_uk_imp_wide_$T1_60, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_61 <- factor(data_uk_imp_wide_$T1_61, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_62 <- factor(data_uk_imp_wide_$T1_62, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_63 <- factor(data_uk_imp_wide_$T1_63, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_64 <- factor(data_uk_imp_wide_$T1_64, levels = c("Homeowner", "Renter"))
+  data_uk_imp_wide_$T1_65 <- factor(data_uk_imp_wide_$T1_65, levels = c("Homeowner", "Renter"))
 
+  data_uk_imp_wide_$T2_50 <- factor(data_uk_imp_wide_$T2_50, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_51 <- factor(data_uk_imp_wide_$T2_51, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_52 <- factor(data_uk_imp_wide_$T2_52, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_53 <- factor(data_uk_imp_wide_$T2_53, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_54 <- factor(data_uk_imp_wide_$T2_54, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_55 <- factor(data_uk_imp_wide_$T2_55, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_56 <- factor(data_uk_imp_wide_$T2_56, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_57 <- factor(data_uk_imp_wide_$T2_57, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_58 <- factor(data_uk_imp_wide_$T2_58, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_59 <- factor(data_uk_imp_wide_$T2_59, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_60 <- factor(data_uk_imp_wide_$T2_60, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_61 <- factor(data_uk_imp_wide_$T2_61, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_62 <- factor(data_uk_imp_wide_$T2_62, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_63 <- factor(data_uk_imp_wide_$T2_63, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_64 <- factor(data_uk_imp_wide_$T2_64, levels = c("Outright owner", "Mortgagor", "Renter"))
+  data_uk_imp_wide_$T2_65 <- factor(data_uk_imp_wide_$T2_65, levels = c("Outright owner", "Mortgagor", "Renter"))
+  
   # create new data sets with indicator for imputation round
   assign(paste0("data_uk_imp_", i), data_uk_imp)
   assign(paste0("data_uk_imp_wide_", i), data_uk_imp_wide)
@@ -217,6 +264,9 @@ rm(vars, data_uk_imp, data_uk_imp_wide, n_imputations, imputation, i)
 ```
 
 ```{r}
-save.image("data/data_uk_final.RData")
+save.image("data/data_final_uk.RData")
 
+```
+
+```{r}
 ```

@@ -23,9 +23,9 @@ set.seed(999)
 # Set last age, truncation and folds, and select SuperLearner models
 last_age <- 65
 trim <- 0.975
-folds <- 5
-SL_folds <- 5
-SL_libs <- c("SL.ranger", "SL.xgboost", "SL.glmnet")
+folds <- 3
+SL_folds <- 3
+SL_libs <- c("SL.ranger")
 
 ```
 
@@ -35,7 +35,7 @@ SL_libs <- c("SL.ranger", "SL.xgboost", "SL.glmnet")
 # Load data and choose from imputed data sets
 load("data/data_final_uk.RData")
 
-data_wide <- data_uk_imp_wide_1
+data_wide <- data_uk_imp_wide_2
 
 rm(list = setdiff(ls(), c("data_wide", "last_age", "trim", "folds", "SL_folds", "SL_libs")))
 
@@ -80,7 +80,7 @@ workers <- pmin(45, workers)
 plan(multisession, workers = workers)
 
 # Iterate through age range
-for (i in c(last_age:51)) {
+for (i in c(60)) {
 
 # Define treatment, outcome, censoring, and confounder variables
 treatment <- paste0("T2_", 50:(i - 1))
@@ -182,7 +182,7 @@ contrasts_outright <- data.frame()
 contrasts_mortgage <- data.frame()
 results <- data.frame()
 
-for (i in c(51:last_age)) {
+for (i in c(60)) {
   
   cntr <- lmtp_contrast(results_outright[[i]], ref = results_renters[[i]], type = c("additive"))
   cntr$vals$age <- i
@@ -212,12 +212,12 @@ for (i in c(51:last_age)) {
 }
 
 # Covert probability estimate at age 51 into survival
-contrasts_outright$age <- c(51:last_age)
+contrasts_outright$age <- c(51:60)
 contrasts_outright$theta <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$theta, contrasts_outright$theta)
 contrasts_outright$conf.low <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$conf.low, contrasts_outright$conf.low)
 contrasts_outright$conf.high <- ifelse(contrasts_outright$age == 51, (-1) * contrasts_outright$conf.high, contrasts_outright$conf.high)
 
-contrasts_mortgage$age <- c(51:last_age)
+contrasts_mortgage$age <- c(51:60)
 contrasts_mortgage$theta <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$theta, contrasts_mortgage$theta)
 contrasts_mortgage$conf.low <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$conf.low, contrasts_mortgage$conf.low)
 contrasts_mortgage$conf.high <- ifelse(contrasts_mortgage$age == 51, (-1) * contrasts_mortgage$conf.high, contrasts_mortgage$conf.high)
@@ -228,8 +228,7 @@ results$conf.high <- ifelse(results$age == 51, 1 - results$conf.high, results$co
 
 rm(i)
 
-#Save results
-save.image("outputs/results_imps2/results_uk_2_imp1.RData")
+results
 
 ```
 

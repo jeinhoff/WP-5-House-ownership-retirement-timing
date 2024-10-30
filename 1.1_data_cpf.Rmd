@@ -1,7 +1,6 @@
 ---
 title: "1.1_data_cpf"
 author: "Jan Einhoff"
-date: "05/2024"
 ---
 
 This R markdown file is used to prepare the baseline variables from the Comparative Panel File (CPF) for Germany (SOEP) and the UK (BHPS/UKHLS) for the analysis.
@@ -168,9 +167,7 @@ data_cpf <- data_cpf %>%
 # retired
 data_cpf <- data_cpf %>%
   group_by(orgpid) %>%
-  mutate(retired = as.numeric(as.character(retf)),
-         retired = ifelse(is.na(retired) & employment_status == "Retired", 1, retired),
-         retired = ifelse(is.na(retired) & lead(retired, 1) == 0 & lag(retired, 1) == 0, 0, retired)) %>%
+  mutate(retired = as.numeric(as.character(retf))) %>%
   fill(c("retired"), .direction = "down") %>%
   select(-retf)
 
@@ -197,7 +194,7 @@ data_cpf <- data_cpf %>%
 
 # hh_income_eq
 data_cpf <- data_cpf %>%
-  mutate(hh_income_eq = hhinc_post / sqrt(household_size)) %>%
+  mutate(hh_income_eq = log((hhinc_post + 1) / sqrt(household_size))) %>%
   select(-hhinc_post)
 
 # replace occupation, sector and self-employment for individuals outside the labour market
@@ -216,18 +213,25 @@ unemp <- unemp %>% mutate(year = as.numeric(year))
 
 data_cpf <- data_cpf %>% mutate(year = year_born + age) %>% left_join(unemp, by = c("country", "year"))
 
-rm(unemp)
+# add annual inflation index
+infl <- read.xlsx("data/data_raw/inflation_rates.xlsx")
+
+infl <- infl %>% mutate(year = as.numeric(year))
+
+data_cpf <- data_cpf %>% left_join(infl, by = c("country", "year"))
+
+rm(unemp, infl)
 
 ```
 
 ```{r}
 # gather variables and save
-data_cpf <- data_cpf %>% select(country, orgpid, hid, age, year, female, year_born, cohort_born, retired, migrant, education_level, marital_status, partner_in_hh, children_any, household_size, poor_health_sr, poor_health_sb, employment_status, hh_income_eq, occupation_group, public_sector, self_employed, unemployment_rate)
+data_cpf <- data_cpf %>% select(country, orgpid, hid, age, year, female, year_born, cohort_born, retired, migrant, education_level, marital_status, partner_in_hh, children_any, household_size, poor_health_sr, poor_health_sb, employment_status, hh_income_eq, occupation_group, public_sector, self_employed, unemployment_rate, inflation_rate)
 
 ```
 
 ```{r}
-save.image("data/data_cpf.RData")
+save.image("data/data_preprocessed/data_cpf.RData")
 
 ```
 

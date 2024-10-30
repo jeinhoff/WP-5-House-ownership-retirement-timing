@@ -1,0 +1,366 @@
+---
+title: "2.1_analysis"
+---
+
+```{r setup}
+# Load packages
+library("tidyverse")
+library("lmtp")
+library("future")
+library("lubridate")
+library("listenv")
+library("SuperLearner")
+
+# Avoid exponential notation in numbers
+options("scipen" = 100, "digits" = 4)
+
+# Set global seed
+set.seed(999)
+
+# Clear workspace
+rm(list = ls())
+
+# Set last age, density ratio trimming and folds, and select SuperLearner libraries
+last_age <- 65
+trim <- 0.975
+folds <- 5
+SL_folds <- 5
+SL_libs <- c("SL.glmnet", "SL.ranger", "SL.xgboost")
+
+```
+
+# uk - Imp 1
+```{r}
+# Load data and choose from imputed data sets
+load("data/data_final_uk.RData")
+
+data_wide <- data_uk_imp_wide_1
+
+rm(list = setdiff(ls(), c("data_wide", "last_age", "trim", "folds", "SL_folds", "SL_libs")))
+
+data_wide <- data_wide %>% 
+  mutate(across(starts_with("T1_"), ~as.character(.))) %>%
+  mutate(across(starts_with("T3_"), ~as.character(.)))
+
+data_wide <- data_wide %>%
+  mutate(T3_50 = case_when(T1_50 == "Homeowner" ~ "1", T1_50 == "Renter" & T3_50 == 0 ~ "2", T1_50 == "Renter" & T3_50 == 1 ~ "3")) %>%
+  mutate(T3_51 = case_when(T1_51 == "Homeowner" ~ "1", T1_51 == "Renter" & T3_51 == 0 ~ "2", T1_51 == "Renter" & T3_51 == 1 ~ "3")) %>%
+  mutate(T3_52 = case_when(T1_52 == "Homeowner" ~ "1", T1_52 == "Renter" & T3_52 == 0 ~ "2", T1_52 == "Renter" & T3_52 == 1 ~ "3")) %>%
+  mutate(T3_53 = case_when(T1_53 == "Homeowner" ~ "1", T1_53 == "Renter" & T3_53 == 0 ~ "2", T1_53 == "Renter" & T3_53 == 1 ~ "3")) %>%
+  mutate(T3_54 = case_when(T1_54 == "Homeowner" ~ "1", T1_54 == "Renter" & T3_54 == 0 ~ "2", T1_54 == "Renter" & T3_54 == 1 ~ "3")) %>%
+  mutate(T3_55 = case_when(T1_55 == "Homeowner" ~ "1", T1_55 == "Renter" & T3_55 == 0 ~ "2", T1_55 == "Renter" & T3_55 == 1 ~ "3")) %>%
+  mutate(T3_56 = case_when(T1_56 == "Homeowner" ~ "1", T1_56 == "Renter" & T3_56 == 0 ~ "2", T1_56 == "Renter" & T3_56 == 1 ~ "3")) %>%
+  mutate(T3_57 = case_when(T1_57 == "Homeowner" ~ "1", T1_57 == "Renter" & T3_57 == 0 ~ "2", T1_57 == "Renter" & T3_57 == 1 ~ "3")) %>%
+  mutate(T3_58 = case_when(T1_58 == "Homeowner" ~ "1", T1_58 == "Renter" & T3_58 == 0 ~ "2", T1_58 == "Renter" & T3_58 == 1 ~ "3")) %>%
+  mutate(T3_59 = case_when(T1_59 == "Homeowner" ~ "1", T1_59 == "Renter" & T3_59 == 0 ~ "2", T1_59 == "Renter" & T3_59 == 1 ~ "3")) %>%
+  mutate(T3_60 = case_when(T1_60 == "Homeowner" ~ "1", T1_60 == "Renter" & T3_60 == 0 ~ "2", T1_60 == "Renter" & T3_60 == 1 ~ "3")) %>%
+  mutate(T3_61 = case_when(T1_61 == "Homeowner" ~ "1", T1_61 == "Renter" & T3_61 == 0 ~ "2", T1_61 == "Renter" & T3_61 == 1 ~ "3")) %>%
+  mutate(T3_62 = case_when(T1_62 == "Homeowner" ~ "1", T1_62 == "Renter" & T3_62 == 0 ~ "2", T1_62 == "Renter" & T3_62 == 1 ~ "3")) %>%
+  mutate(T3_63 = case_when(T1_63 == "Homeowner" ~ "1", T1_63 == "Renter" & T3_63 == 0 ~ "2", T1_63 == "Renter" & T3_63 == 1 ~ "3")) %>%
+  mutate(T3_64 = case_when(T1_64 == "Homeowner" ~ "1", T1_64 == "Renter" & T3_64 == 0 ~ "2", T1_64 == "Renter" & T3_64 == 1 ~ "3")) %>%
+  mutate(T3_65 = case_when(T1_65 == "Homeowner" ~ "1", T1_65 == "Renter" & T3_65 == 0 ~ "2", T1_65 == "Renter" & T3_65 == 1 ~ "3"))
+
+data_wide <- data_wide %>% mutate(across(starts_with("T3_"), ~factor(., levels = 0:3)))
+
+data_wide <- data_wide %>% select(-starts_with(c("T1", "T2")))
+
+start <- Sys.time()
+
+# Create containers for results
+results_homeowners <- listenv()
+results_renters <- listenv()
+
+# Set up parallel computing with max 30 cores
+workers <- as.numeric(availableCores())
+workers <- pmin(30, workers)
+
+plan(multisession, workers = workers)
+
+# Iterate through age range
+for (i in c(last_age:51)) {
+  
+# Define treatment, outcome, censoring, and confounder variables
+treatment <- paste0("T3_", 50:(i - 1))
+outcome <- paste0("Y_", 51:i)
+censoring <- paste0("C_", 50:(i - 1))
+baseline <- c("B1", "B2", "B3", "B4")
+
+vars <- data_wide %>% select(starts_with(c("L"))) %>% names() 
+
+time_vary = list()
+
+for (tp in c(50:(i - 1))) {
+  time_vary_new <- c(vars[str_detect(vars, str_pad(tp, 2, pad = "0"))])
+  
+  time_vary[[length(time_vary) + 1]] <- time_vary_new}
+
+  # Initialize TMLE for private renters aged i
+  shifted <- data_wide %>% 
+    mutate(across(starts_with("T3_"), ~if_else(. == "1" | . == "3", "2", "2"))) %>%
+    mutate(across(starts_with("T3_"), ~factor(., levels = 0:3))) %>%
+    mutate(across(starts_with("C_"), ~replace(1, 1, 1)))
+  
+  results_renters[[i]] %<-% {lmtp_tmle(data_wide,
+                                       trt = treatment,
+                                       outcome = outcome,
+                                       baseline = baseline,
+                                       time_vary = time_vary,
+                                       cens = censoring,
+                                       shifted = shifted,
+                                       outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                       learners_outcome = SL_libs,
+                                       learners_trt = SL_libs,
+                                       folds = folds,
+                                       .trim = trim,
+                                       .learners_outcome_folds = SL_folds,
+                                       .learners_trt_folds = SL_folds)}
+
+  # Initialize TMLE for homeowners aged i
+  shifted <- data_wide %>% 
+    mutate(across(starts_with("T3_"), ~if_else(. == "2" | . == "3", "1", "1"))) %>%
+    mutate(across(starts_with("T3_"), ~factor(., levels = 0:3))) %>%
+    mutate(across(starts_with("C_"), ~replace(1, 1, 1)))
+  
+  results_homeowners[[i]] %<-% {lmtp_tmle(data_wide,
+                                          trt = treatment,
+                                          outcome = outcome,
+                                          baseline = baseline,
+                                          time_vary = time_vary,
+                                          cens = censoring,
+                                          shifted = shifted,
+                                          outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                          learners_outcome = SL_libs,
+                                          learners_trt = SL_libs,
+                                          folds = folds,
+                                          .trim = trim,
+                                          .learners_outcome_folds = SL_folds,
+                                          .learners_trt_folds = SL_folds)}
+
+  print(paste0("Initialized TMLE for age ", i, "."))
+
+  rm(time_vary_new, tp, shifted)
+
+}
+
+# Gather results
+results_homeowners <- as.list(results_homeowners)
+results_renters <- as.list(results_renters)
+
+outputs_homeowners <- results_homeowners
+outputs_renters <- results_renters
+
+end <- Sys.time()
+
+print(paste0("Estimation completed at ", paste(hour(end), minute(end), sep = ":"), " after ", round(difftime(end, start, units = "mins"), 0), " minutes."))
+
+rm(treatment, outcome, censoring, time_vary, baseline, workers, i, start, end)
+
+contrasts <- data.frame()
+  
+results <- data.frame()
+
+for (i in c(last_age:51)) {
+  
+  cntr <- lmtp_contrast(results_homeowners[[i]], ref = results_renters[[i]], type = c("additive"))
+  cntr$vals$age <- i
+  contrasts <- rbind(contrasts, cntr$vals)
+  
+  rslt <- tidy(results_homeowners[[i]])
+  rslt$age <- i
+  rslt$group <- "Homeowners"
+  results <- rbind(results, rslt)
+  
+  rslt <- tidy(results_renters[[i]])
+  rslt$age <- i
+  rslt$group <- "Renters"
+  results <- rbind(results, rslt)
+  
+  rm(cntr, rslt)
+  
+}
+
+# convert probability estimate at age 51 into survival
+contrasts$age <- c(last_age:51)
+contrasts$theta <- ifelse(contrasts$age == 51, (-1) * contrasts$theta, contrasts$theta)
+contrasts$conf.low <- ifelse(contrasts$age == 51, (-1) * contrasts$conf.low, contrasts$conf.low)
+contrasts$conf.high <- ifelse(contrasts$age == 51, (-1) * contrasts$conf.high, contrasts$conf.high)
+
+results$estimate <- ifelse(results$age == 51, 1 - results$estimate, results$estimate)
+results$conf.low <- ifelse(results$age == 51, 1 - results$conf.low, results$conf.low)
+results$conf.high <- ifelse(results$age == 51, 1 - results$conf.high, results$conf.high)
+
+rm(i, results_homeowners, results_renters)
+
+save.image("outputs/results_imps/results_uk_imp1_social.RData")
+
+```
+
+
+# de - Imp 1
+```{r}
+# Load data and choose from imputed data sets
+load("data/data_final_de.RData")
+
+data_wide <- data_de_imp_wide_1
+
+rm(list = setdiff(ls(), c("data_wide", "last_age", "trim", "folds", "SL_folds", "SL_libs")))
+
+data_wide <- data_wide %>% 
+  mutate(across(starts_with("T1_"), ~as.character(.))) %>%
+  mutate(across(starts_with("T3_"), ~as.character(.)))
+
+data_wide <- data_wide %>%
+  mutate(T3_50 = case_when(T1_50 == "Homeowner" ~ "1", T1_50 == "Renter" & T3_50 == 0 ~ "2", T1_50 == "Renter" & T3_50 == 1 ~ "3")) %>%
+  mutate(T3_51 = case_when(T1_51 == "Homeowner" ~ "1", T1_51 == "Renter" & T3_51 == 0 ~ "2", T1_51 == "Renter" & T3_51 == 1 ~ "3")) %>%
+  mutate(T3_52 = case_when(T1_52 == "Homeowner" ~ "1", T1_52 == "Renter" & T3_52 == 0 ~ "2", T1_52 == "Renter" & T3_52 == 1 ~ "3")) %>%
+  mutate(T3_53 = case_when(T1_53 == "Homeowner" ~ "1", T1_53 == "Renter" & T3_53 == 0 ~ "2", T1_53 == "Renter" & T3_53 == 1 ~ "3")) %>%
+  mutate(T3_54 = case_when(T1_54 == "Homeowner" ~ "1", T1_54 == "Renter" & T3_54 == 0 ~ "2", T1_54 == "Renter" & T3_54 == 1 ~ "3")) %>%
+  mutate(T3_55 = case_when(T1_55 == "Homeowner" ~ "1", T1_55 == "Renter" & T3_55 == 0 ~ "2", T1_55 == "Renter" & T3_55 == 1 ~ "3")) %>%
+  mutate(T3_56 = case_when(T1_56 == "Homeowner" ~ "1", T1_56 == "Renter" & T3_56 == 0 ~ "2", T1_56 == "Renter" & T3_56 == 1 ~ "3")) %>%
+  mutate(T3_57 = case_when(T1_57 == "Homeowner" ~ "1", T1_57 == "Renter" & T3_57 == 0 ~ "2", T1_57 == "Renter" & T3_57 == 1 ~ "3")) %>%
+  mutate(T3_58 = case_when(T1_58 == "Homeowner" ~ "1", T1_58 == "Renter" & T3_58 == 0 ~ "2", T1_58 == "Renter" & T3_58 == 1 ~ "3")) %>%
+  mutate(T3_59 = case_when(T1_59 == "Homeowner" ~ "1", T1_59 == "Renter" & T3_59 == 0 ~ "2", T1_59 == "Renter" & T3_59 == 1 ~ "3")) %>%
+  mutate(T3_60 = case_when(T1_60 == "Homeowner" ~ "1", T1_60 == "Renter" & T3_60 == 0 ~ "2", T1_60 == "Renter" & T3_60 == 1 ~ "3")) %>%
+  mutate(T3_61 = case_when(T1_61 == "Homeowner" ~ "1", T1_61 == "Renter" & T3_61 == 0 ~ "2", T1_61 == "Renter" & T3_61 == 1 ~ "3")) %>%
+  mutate(T3_62 = case_when(T1_62 == "Homeowner" ~ "1", T1_62 == "Renter" & T3_62 == 0 ~ "2", T1_62 == "Renter" & T3_62 == 1 ~ "3")) %>%
+  mutate(T3_63 = case_when(T1_63 == "Homeowner" ~ "1", T1_63 == "Renter" & T3_63 == 0 ~ "2", T1_63 == "Renter" & T3_63 == 1 ~ "3")) %>%
+  mutate(T3_64 = case_when(T1_64 == "Homeowner" ~ "1", T1_64 == "Renter" & T3_64 == 0 ~ "2", T1_64 == "Renter" & T3_64 == 1 ~ "3")) %>%
+  mutate(T3_65 = case_when(T1_65 == "Homeowner" ~ "1", T1_65 == "Renter" & T3_65 == 0 ~ "2", T1_65 == "Renter" & T3_65 == 1 ~ "3"))
+
+data_wide <- data_wide %>% mutate(across(starts_with("T3_"), ~factor(., levels = 0:3)))
+
+data_wide <- data_wide %>% select(-starts_with(c("T1", "T2")))
+
+start <- Sys.time()
+
+# Create containers for results
+results_homeowners <- listenv()
+results_renters <- listenv()
+
+# Set up parallel computing with max 30 cores
+workers <- as.numeric(availableCores())
+workers <- pmin(30, workers)
+
+plan(multisession, workers = workers)
+
+# Iterate through age range
+for (i in c(last_age:51)) {
+  
+# Define treatment, outcome, censoring, and confounder variables
+treatment <- paste0("T3_", 50:(i - 1))
+outcome <- paste0("Y_", 51:i)
+censoring <- paste0("C_", 50:(i - 1))
+baseline <- c("B1", "B2", "B3", "B4")
+
+vars <- data_wide %>% select(starts_with(c("L"))) %>% names() 
+
+time_vary = list()
+
+for (tp in c(50:(i - 1))) {
+  time_vary_new <- c(vars[str_detect(vars, str_pad(tp, 2, pad = "0"))])
+  
+  time_vary[[length(time_vary) + 1]] <- time_vary_new}
+
+  # Initialize TMLE for private renters aged i
+  shifted <- data_wide %>% 
+    mutate(across(starts_with("T3_"), ~if_else(. == "1" | . == "3", "2", "2"))) %>%
+    mutate(across(starts_with("T3_"), ~factor(., levels = 0:3))) %>%
+    mutate(across(starts_with("C_"), ~replace(1, 1, 1)))
+  
+  results_renters[[i]] %<-% {lmtp_tmle(data_wide,
+                                       trt = treatment,
+                                       outcome = outcome,
+                                       baseline = baseline,
+                                       time_vary = time_vary,
+                                       cens = censoring,
+                                       shifted = shifted,
+                                       outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                       learners_outcome = SL_libs,
+                                       learners_trt = SL_libs,
+                                       folds = folds,
+                                       .trim = trim,
+                                       .learners_outcome_folds = SL_folds,
+                                       .learners_trt_folds = SL_folds)}
+
+  # Initialize TMLE for homeowners aged i
+  shifted <- data_wide %>% 
+    mutate(across(starts_with("T3_"), ~if_else(. == "2" | . == "3", "1", "1"))) %>%
+    mutate(across(starts_with("T3_"), ~factor(., levels = 0:3))) %>%
+    mutate(across(starts_with("C_"), ~replace(1, 1, 1)))
+  
+  results_homeowners[[i]] %<-% {lmtp_tmle(data_wide,
+                                          trt = treatment,
+                                          outcome = outcome,
+                                          baseline = baseline,
+                                          time_vary = time_vary,
+                                          cens = censoring,
+                                          shifted = shifted,
+                                          outcome_type = ifelse(i == 51, "binomial", "survival"),
+                                          learners_outcome = SL_libs,
+                                          learners_trt = SL_libs,
+                                          folds = folds,
+                                          .trim = trim,
+                                          .learners_outcome_folds = SL_folds,
+                                          .learners_trt_folds = SL_folds)}
+
+  print(paste0("Initialized TMLE for age ", i, "."))
+
+  rm(time_vary_new, tp, shifted)
+
+}
+
+# Gather results
+results_homeowners <- as.list(results_homeowners)
+results_renters <- as.list(results_renters)
+
+outputs_homeowners <- results_homeowners
+outputs_renters <- results_renters
+
+end <- Sys.time()
+
+print(paste0("Estimation completed at ", paste(hour(end), minute(end), sep = ":"), " after ", round(difftime(end, start, units = "mins"), 0), " minutes."))
+
+rm(treatment, outcome, censoring, time_vary, baseline, workers, i, start, end)
+
+contrasts <- data.frame()
+  
+results <- data.frame()
+
+for (i in c(last_age:51)) {
+  
+  cntr <- lmtp_contrast(results_homeowners[[i]], ref = results_renters[[i]], type = c("additive"))
+  cntr$vals$age <- i
+  contrasts <- rbind(contrasts, cntr$vals)
+  
+  rslt <- tidy(results_homeowners[[i]])
+  rslt$age <- i
+  rslt$group <- "Homeowners"
+  results <- rbind(results, rslt)
+  
+  rslt <- tidy(results_renters[[i]])
+  rslt$age <- i
+  rslt$group <- "Renters"
+  results <- rbind(results, rslt)
+  
+  rm(cntr, rslt)
+  
+}
+
+# convert probability estimate at age 51 into survival
+contrasts$age <- c(last_age:51)
+contrasts$theta <- ifelse(contrasts$age == 51, (-1) * contrasts$theta, contrasts$theta)
+contrasts$conf.low <- ifelse(contrasts$age == 51, (-1) * contrasts$conf.low, contrasts$conf.low)
+contrasts$conf.high <- ifelse(contrasts$age == 51, (-1) * contrasts$conf.high, contrasts$conf.high)
+
+results$estimate <- ifelse(results$age == 51, 1 - results$estimate, results$estimate)
+results$conf.low <- ifelse(results$age == 51, 1 - results$conf.low, results$conf.low)
+results$conf.high <- ifelse(results$age == 51, 1 - results$conf.high, results$conf.high)
+
+rm(i, results_homeowners, results_renters)
+
+save.image("outputs/results_imps/results_de_imp1_social.RData")
+
+```
+
+```{r}
+```
